@@ -1,5 +1,7 @@
 # import grequests
 import requests
+from multiprocessing.pool import ThreadPool
+from torpy.http.requests import tor_requests_session
 import random
 import argparse
 from pathlib import Path
@@ -23,6 +25,8 @@ import genexp
 # make list of realistic User-Agent, randomize those too
 ##################
 
+
+N_THREADS = 4
 
 # -----------------------------------------------------------------------------
 
@@ -118,6 +122,10 @@ def parse_arguments():
     parser.add_argument("-S", "--sleep-max", type=float, default=10,
                         help="max number of seconds to wait between POSTs",
     )
+    parser.add_argument("-T", "--tor-routing", action="store_true",
+                        help="if enabled, use the TOR network to send requests")
+    parser.add_argument("-b", "--batch-size", type=int, default=1,
+                        help="the number of concurrent requests sent for each POST batch")
     parser.add_argument("-v", "--verbose", action="store_true"
     )
     # fmt: on
@@ -199,24 +207,47 @@ def wait(args):
 if __name__ == "__main__":
     try:
         args = parse_arguments()
-    
-        runs = 0
-        while args.count == 0 or runs < args.count :
-            runs += 1
 
-            for address in args.target:
-                data = make_data(args)
-                
-                if args.verbose:
-                    print(f"Sending data to {address}...")
-                
-                r = requests.post(url=address, data=data)
+        # multiplies the list of targets for the batch size -> amounts to n = t * b concurrent requests
+        targets = args.target * args.batch_size 
 
-                if r:
+        # *** USE TOR ***
+        if args.tor_routing:
+
+            with tor_requests_session() as s: # returns request.Session() object
+
+                def make_post(address, **kwargs):
                     if args.verbose:
-                        print("Data sent successfully.")
+                        print(f"Sending data to {address}...")
+                    s.post(data=make_data(args), url=address, **kwargs)
 
-                wait(args)
+                runs = 0
+                while args.count == 0 or runs < args.count :
+                    runs += 1
+
+                    with ThreadPool(N_THREADS) as pool:
+                        pool.map(make_data, targets)
+
+                    wait(args)
+
+        # *** NORMAL REQUESTS ***
+        else:
+
+            runs = 0
+            while args.count == 0 or runs < args.count :
+                runs += 1
+                for address in args.target:
+                    data = make_data(args)
+                    
+                    if args.verbose:
+                        print(f"Sending data to {address}...", end="")
+                    
+                    r = requests.post(url=address, data=data)
+
+                    if r and args.verbose:
+                            print("OK.")
+
+                    wait(args)
 
     except Exception as e:
         print(e)
