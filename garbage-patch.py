@@ -1,12 +1,17 @@
-import string
+# import grequests
 import requests
 import random
 import argparse
 from pathlib import Path
 from time import sleep
-import enum
 import genexp
 
+
+## test with: ##
+
+# python ./garbage-patch.py -t http://localhost:8080 -p user -x "usr\\W\\d{3}\\!?" -p pass -w ./wordlist/ITA/bruteforce.txt -v -p tel -m IT -S 2
+
+##
 
 ##################
 # TODO
