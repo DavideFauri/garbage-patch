@@ -1,5 +1,5 @@
-# import grequests
 import requests
+import threading
 import random
 import argparse
 from pathlib import Path
@@ -7,11 +7,26 @@ from time import sleep
 import genexp
 
 
-## test with: ##
+## to test garbage generation:
 
-# python ./garbage-patch.py -t http://localhost:8080 -p user -x "usr\\W\\d{3}\\!?" -p pass -w ./wordlist/ITA/bruteforce.txt -v -p tel -m IT -S 2
+# Terminal 1:
+# python ./http-listener.py
 
-##
+# Terminal 2:
+# python ./garbage-patch.py -u http://localhost:8080 -p user -x "usr\\W\\d{3}\\!?" -p pass -w ./wordlist/ITA/bruteforce.txt -p tel -m IT -S 2 -v
+
+
+## to test multitarget/multithreading:
+
+# Terminal 1:
+# python ./http-listener.py 8080
+
+# Terminal 2:
+# python ./http-listener.py 8081
+
+# Terminal 3:
+# python ./garbage-patch.py -u http://localhost:8080 -u http://localhost:8081 -p test_param -x "test_\d\d" -t 2 -s 1 -S 2 -v
+
 
 ##################
 # TODO
@@ -36,7 +51,7 @@ class Poisoner():
 
 class WordListPoisoner(Poisoner):
 
-    def __init__(self, filepath:str):        
+    def __init__(self, filepath:str):
         assert Path(filepath).exists(), f"The file {filepath} does not exist!"
 
         wordset = set[str]()
@@ -46,7 +61,7 @@ class WordListPoisoner(Poisoner):
         self.words = list(wordset)
 
         super().__init__()
-    
+
     def generate(self):
         return random.choice(self.words)
 
@@ -57,7 +72,7 @@ class GenexPoisoner(Poisoner):
     def __init__(self, genex_str:str):
         self.genex = genexp.parse(genex_str)
         super().__init__()
-    
+
     def generate(self):
         return self.genex.generate()
 
@@ -76,17 +91,13 @@ class TelephonePoisoner(GenexPoisoner):
 
     def __init__(self, countrycode:str):
         self.prefixes = "(" + "|".join(str(prefix) for prefix in TelephonePoisoner.countries[countrycode]["prefix"]) + ")"
+        self.optional_space = " ?"
         self.numbers = TelephonePoisoner.countries[countrycode]["format"]
 
-        super().__init__(self.prefixes + self.numbers)
-    
+        super().__init__(self.prefixes + self.optional_space + self.numbers)
+
     def generate(self):
-        return super().generate()    
-
-
-# -----------------------------------------------------------------------------
-
-
+        return super().generate()
 
 # -----------------------------------------------------------------------------
 
@@ -94,10 +105,10 @@ def parse_arguments():
 
     parser = argparse.ArgumentParser()
     # fmt: off
-    parser.add_argument("-t", "--target", metavar=("ADDR"), action="append", required=True,
-                        help="web address(es) of the POST target(s)",
+    parser.add_argument("-u", "--url", metavar=("URL"), action="append", required=True,
+                        help="URL address of each POST target",
     )
-    parser.add_argument("-p", "--param-name", action="append", required=True, dest="params",
+    parser.add_argument("-p", "--param", action="append", required=True, dest="params",
                         help="name of each parameter to send via POST",
     )
     parser.add_argument("-w", "--wordlist", metavar=("FILE"), action=CreatePoisoner, dest="sources",
@@ -110,7 +121,10 @@ def parse_arguments():
                         help="country code used to generate realistic mobile numbers",
     )
     parser.add_argument("-c", "--count", type=int, default=0,
-                        help="number of POST attempts (0 = no limit)",
+                        help="total count of POST attempts (0 = no limit)",
+    )
+    parser.add_argument("-t", "--threads", type=int, default=1,
+                        help="number of threads to use for each target URL"
     )
     parser.add_argument("-s", "--sleep-min", type=float, default=0.1,
                         help="min number of seconds to wait between POSTs",
@@ -122,14 +136,9 @@ def parse_arguments():
     )
     # fmt: on
 
-# FIXME
-
-    # arg_str = "-t http://localhost:8080 -p user -x usr\\W\\d{3}\\!? -p pass -w ./wordlistITA/bruteforce.txt -v -p tel -m IT -S 2"
-    # args = parser.parse_args(arg_str.split())
-
-# FIXME
-
     args = parser.parse_args()
+
+    ## validation
 
     error_string = (
         "Each parameter requires a single data source (file or regex)!\n"
@@ -139,8 +148,10 @@ def parse_arguments():
     assert args.sources != None, error_string
     assert len(args.params) == len(args.sources), error_string
 
-    print(args)
+    assert args.count >=0, "The value for --count must be 0 or higher!"
+    assert args.threads >=1, "The value for --threads must be 1 or higher!"
 
+    print(args)
 
     return args
 
@@ -150,7 +161,7 @@ class CreatePoisoner(argparse.Action):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-    
+
     def __call__(self,_,namespace,values: str,option_string: str):
         arg_list = getattr(namespace, self.dest) or []
         match option_string:
@@ -165,9 +176,7 @@ class CreatePoisoner(argparse.Action):
         arg_list.append(poisoner)
         setattr(namespace, self.dest, arg_list)
 
-
 # -----------------------------------------------------------------------------
-
 
 def make_data(args):
     data = {}
@@ -177,12 +186,10 @@ def make_data(args):
     if args.verbose:
         print("Generating random data to POST: ", end="")
         print(data)
-    
+
     return data
 
-
 # -----------------------------------------------------------------------------
-
 
 def wait(args):
     sleep_duration = (
@@ -191,32 +198,61 @@ def wait(args):
 
     if args.verbose:
         print(f"Sleeping for {sleep_duration} seconds...")
-    
+
     sleep(sleep_duration)
+
+# -----------------------------------------------------------------------------
+
+def countdown(count):
+    if count == 0:
+        while True:
+            yield True
+    else:
+        for _ in range(count):
+            yield True
+
+# -----------------------------------------------------------------------------
+
+def do_request(url, args):
+
+    for _ in countdown(args.count):
+        data = make_data(args)
+
+        if args.verbose:
+            print(f"Sending data to {url}...")
+
+        response = requests.post(url=url, data=data)
+
+        if not response.ok and args.verbose:
+            print(f"ERR {response.status_code}: {response.reason}")
+
+        wait(args)
 
 # -----------------------------------------------------------------------------
 
 if __name__ == "__main__":
     try:
         args = parse_arguments()
-    
-        runs = 0
-        while args.count == 0 or runs < args.count :
-            runs += 1
 
-            for address in args.target:
-                data = make_data(args)
-                
-                if args.verbose:
-                    print(f"Sending data to {address}...")
-                
-                r = requests.post(url=address, data=data)
+        request_function = do_request
+        request_threads = []
 
-                if r:
-                    if args.verbose:
-                        print("Data sent successfully.")
+        for url in args.url:
 
-                wait(args)
+            def this_request():
+                return request_function(url, args)
+
+            for _ in range(args.threads):
+                t = threading.Thread(target=this_request)
+                t.daemon=True
+                request_threads.append(t)
+
+            for t in request_threads:
+                t.start()
+
+            for t in request_threads:
+                t.join()
+
 
     except Exception as e:
         print(e)
