@@ -102,11 +102,6 @@ class TelephonePoisoner(GenexPoisoner):
     def generate(self):
         return super().generate()
 
-
-# -----------------------------------------------------------------------------
-
-
-
 # -----------------------------------------------------------------------------
 
 def parse_arguments():
@@ -146,13 +141,6 @@ def parse_arguments():
     parser.add_argument("-v", "--verbose", action="store_true"
     )
     # fmt: on
-
-# FIXME
-
-    # arg_str = "-t http://localhost:8080 -p user -x usr\\W\\d{3}\\!? -p pass -w ./wordlistITA/bruteforce.txt -v -p tel -m IT -S 2"
-    # args = parser.parse_args(arg_str.split())
-
-# FIXME
 
     args = parser.parse_args()
 
@@ -226,7 +214,7 @@ def countdown(count):
         while True:
             yield True
     else:
-        for n in range(count):
+        for _ in range(count):
             yield True
 
 # -----------------------------------------------------------------------------
@@ -271,6 +259,7 @@ def do_tor_request(url, args):
                         print(f"ERROR {response.status_code}: {response.reason}")
                 
                 wait(args)
+                
 # -----------------------------------------------------------------------------
 
 if __name__ == "__main__":
