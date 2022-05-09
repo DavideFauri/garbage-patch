@@ -259,6 +259,7 @@ def do_tor_request(url, args):
                         print(f"ERROR {response.status_code}: {response.reason}")
                 
                 wait(args)
+                
 # -----------------------------------------------------------------------------
 
 if __name__ == "__main__":
