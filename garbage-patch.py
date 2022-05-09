@@ -238,14 +238,16 @@ def do_request(url, data_gen, args):
 
 # -----------------------------------------------------------------------------
 
-def do_tor_request(url, args):
-    pass
+def do_tor_request(url, data_gen, args):
+
+    fixed_url = "https://" + url if not (url.beginsWith("https://") or url.beginsWith("http://"))
+
     with TorClient() as tor:
         with tor.get_guard() as guard:
             adapter = TorHttpAdapter(guard=guard, hops_count=3)
 
             for _ in countdown(args.count):
-                data = make_data(args)
+                data = next(data_gen)
 
                 with tor_requests.Session() as sess:
                     sess.headers.update({'User-Agent': 'Mozilla/5.0'})
@@ -255,13 +257,13 @@ def do_tor_request(url, args):
                     if args.verbose:
                         print(f"Sending data to {url}...")
 
-                    response = sess.post(url=url, data=data)
+                    response = sess.post(url=fixed_url, data=data)
 
                     if not response.ok and args.verbose:
                         print(f"ERROR {response.status_code}: {response.reason}")
-                
+
                 wait(args)
-                
+
 # -----------------------------------------------------------------------------
 
 if __name__ == "__main__":
