@@ -1,5 +1,8 @@
 import requests
 import threading
+from torpy import TorClient
+from torpy.http import requests as tor_requests
+from torpy.http.adapter import TorHttpAdapter
 import random
 import argparse
 from pathlib import Path
@@ -247,7 +250,27 @@ def do_request(url, args):
 
 def do_tor_request(url, args):
     pass
+    with TorClient() as tor:
+        with tor.get_guard() as guard:
+            adapter = TorHttpAdapter(guard=guard, hops_count=3)
 
+            for _ in countdown(args.count):
+                data = make_data(args)
+
+                with tor_requests.Session() as sess:
+                    sess.headers.update({'User-Agent': 'Mozilla/5.0'})
+                    sess.mount(prefix = 'http://', adapter=adapter)
+                    sess.mount(prefix = 'https://', adapter=adapter)
+
+                    if args.verbose:
+                        print(f"Sending data to {url}...")
+
+                    response = sess.post(url=url, data=data)
+
+                    if not response.ok and args.verbose:
+                        print(f"ERROR {response.status_code}: {response.reason}")
+                
+                wait(args)
 # -----------------------------------------------------------------------------
 
 if __name__ == "__main__":
@@ -255,8 +278,8 @@ if __name__ == "__main__":
         args = parse_arguments()
 
         request_function = do_tor_request if args.tor else do_request
-
-            request_threads = []
+        
+        request_threads = []
 
         for url in args.url:
 
@@ -268,11 +291,11 @@ if __name__ == "__main__":
                 t.daemon=True
                 request_threads.append(t)
 
-            for t in request_threads:
-                t.start()
+        for t in request_threads:
+            t.start()
 
-            for t in request_threads:
-                t.join()
+        for t in request_threads:
+            t.join()
 
 
     except Exception as e:
