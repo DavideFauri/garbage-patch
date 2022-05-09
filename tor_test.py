@@ -4,52 +4,59 @@ from torpy.http.adapter import TorHttpAdapter
 
 hostname = "ifconfig.me"
 
-print("v1: started")
+try:
+  print("v1: started")
 
-with TorClient() as tor:
+  with TorClient() as tor:
 
-  print("v1: defined client")
-  
-  with tor.create_circuit(3) as circuit:
-    
-    print("v1: created circuit")
-    
-    with circuit.create_stream((hostname,80)) as stream:
+    print("v1: defined client")
 
-      print("v1: created stream")
+    with tor.create_circuit(3) as circuit:
 
-      stream.send(b'GET / HTTP/1.0\r\nHost: %s\r\n\r\n' % hostname.encode())
-      ret = recv_all(stream).decode()
-      print(ret)
+      print("v1: created circuit")
+
+      with circuit.create_stream((hostname,80)) as stream:
+
+        print("v1: created stream")
+
+        stream.send(b'GET / HTTP/1.0\r\nHost: %s\r\n\r\n' % hostname.encode())
+        ret = recv_all(stream).decode()
+        print(ret)
+
+except Exception as e:
+  print(e)
 
 # ---------------
 print()
 # ---------------
 
-print('v2: started')
+try:
+  print('v2: started')
 
-with TorClient() as tor:
+  with TorClient() as tor:
 
-  print("v2: defined client")
+    print("v2: defined client")
 
-  with tor.get_guard() as guard:
+    with tor.get_guard() as guard:
 
-    print("v2: created guard")
+      print("v2: created guard")
 
-    adapter = TorHttpAdapter(guard=guard, hops_count=3)
+      adapter = TorHttpAdapter(guard=guard, hops_count=3)
 
-    print("v2: created adapter")
+      print("v2: created adapter")
 
-    with tor_requests.Session() as sess:
+      with tor_requests.Session() as sess:
 
-      print("v2: created session")
+        print("v2: created session")
 
-      sess.headers.update({'User-Agent': 'Mozilla/5.0'})
-      sess.mount(prefix = 'http://', adapter=adapter)
-      sess.mount(prefix = 'https://', adapter=adapter)
+        sess.headers.update({'User-Agent': 'Mozilla/5.0'})
+        sess.mount(prefix = 'http://', adapter=adapter)
+        sess.mount(prefix = 'https://', adapter=adapter)
 
-      print("v2: configured session")
+        print("v2: configured session")
 
-      response = sess.get(url=hostname)
-      print(response.text)
+        response = sess.get(url=f"http://{hostname}")
+        print(response.text)
 
+except Exception as e:
+  print(e)
