@@ -7,11 +7,26 @@ from time import sleep
 import genexp
 
 
-## test with: ##
+## to test garbage generation:
 
-# python ./garbage-patch.py -t http://localhost:8080 -p user -x "usr\\W\\d{3}\\!?" -p pass -w ./wordlist/ITA/bruteforce.txt -v -p tel -m IT -S 2
+# Terminal 1:
+# python ./http-listener.py
 
-##
+# Terminal 2:
+# python ./garbage-patch.py -u http://localhost:8080 -p user -x "usr\\W\\d{3}\\!?" -p pass -w ./wordlist/ITA/bruteforce.txt -p tel -m IT -S 2 -v
+
+
+## to test multitarget/multithreading:
+
+# Terminal 1:
+# python ./http-listener.py 8080
+
+# Terminal 2:
+# python ./http-listener.py 8081
+
+# Terminal 3:
+# python ./garbage-patch.py -u http://localhost:8080 -u http://localhost:8081 -p test_param -x "test_\d\d" -t 2 -s 1 -S 2 -v
+
 
 ##################
 # TODO
@@ -23,8 +38,6 @@ import genexp
 # make list of realistic User-Agent, randomize those too
 ##################
 
-
-N_THREADS = 4
 
 # -----------------------------------------------------------------------------
 
