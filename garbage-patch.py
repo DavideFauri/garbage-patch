@@ -1,6 +1,6 @@
 # import grequests
 import requests
-from multiprocessing.pool import ThreadPool
+import threading
 from torpy.http.requests import tor_requests_session
 import random
 import argparse
@@ -40,7 +40,7 @@ class Poisoner():
 
 class WordListPoisoner(Poisoner):
 
-    def __init__(self, filepath:str):        
+    def __init__(self, filepath:str):
         assert Path(filepath).exists(), f"The file {filepath} does not exist!"
 
         wordset = set[str]()
@@ -50,7 +50,7 @@ class WordListPoisoner(Poisoner):
         self.words = list(wordset)
 
         super().__init__()
-    
+
     def generate(self):
         return random.choice(self.words)
 
@@ -61,7 +61,7 @@ class GenexPoisoner(Poisoner):
     def __init__(self, genex_str:str):
         self.genex = genexp.parse(genex_str)
         super().__init__()
-    
+
     def generate(self):
         return self.genex.generate()
 
@@ -80,12 +80,13 @@ class TelephonePoisoner(GenexPoisoner):
 
     def __init__(self, countrycode:str):
         self.prefixes = "(" + "|".join(str(prefix) for prefix in TelephonePoisoner.countries[countrycode]["prefix"]) + ")"
+        self.optional_space = " ?"
         self.numbers = TelephonePoisoner.countries[countrycode]["format"]
 
-        super().__init__(self.prefixes + self.numbers)
-    
+        super().__init__(self.prefixes + self.optional_space + self.numbers)
+
     def generate(self):
-        return super().generate()    
+        return super().generate()
 
 
 # -----------------------------------------------------------------------------
@@ -98,10 +99,10 @@ def parse_arguments():
 
     parser = argparse.ArgumentParser()
     # fmt: off
-    parser.add_argument("-t", "--target", metavar=("ADDR"), action="append", required=True,
-                        help="web address(es) of the POST target(s)",
+    parser.add_argument("-u", "--url", metavar=("URL"), action="append", required=True,
+                        help="URL address of each POST target",
     )
-    parser.add_argument("-p", "--param-name", action="append", required=True, dest="params",
+    parser.add_argument("-p", "--param", action="append", required=True, dest="params",
                         help="name of each parameter to send via POST",
     )
     parser.add_argument("-w", "--wordlist", metavar=("FILE"), action=CreatePoisoner, dest="sources",
@@ -114,7 +115,10 @@ def parse_arguments():
                         help="country code used to generate realistic mobile numbers",
     )
     parser.add_argument("-c", "--count", type=int, default=0,
-                        help="number of POST attempts (0 = no limit)",
+                        help="total count of POST attempts (0 = no limit)",
+    )
+    parser.add_argument("-t", "--threads", type=int, default=1,
+                        help="number of threads to use for each target URL"
     )
     parser.add_argument("-s", "--sleep-min", type=float, default=0.1,
                         help="min number of seconds to wait between POSTs",
@@ -122,10 +126,9 @@ def parse_arguments():
     parser.add_argument("-S", "--sleep-max", type=float, default=10,
                         help="max number of seconds to wait between POSTs",
     )
-    parser.add_argument("-T", "--tor-routing", action="store_true",
-                        help="if enabled, use the TOR network to send requests")
-    parser.add_argument("-b", "--batch-size", type=int, default=1,
-                        help="the number of concurrent requests sent for each POST batch")
+    parser.add_argument("-T", "--tor", action="store_true",
+                        help="if enabled, use the TOR network to send requests"
+    )
     parser.add_argument("-v", "--verbose", action="store_true"
     )
     # fmt: on
@@ -139,6 +142,8 @@ def parse_arguments():
 
     args = parser.parse_args()
 
+    ## validation
+
     error_string = (
         "Each parameter requires a single data source (file or regex)!\n"
         + "Params defined:\n"
@@ -147,8 +152,10 @@ def parse_arguments():
     assert args.sources != None, error_string
     assert len(args.params) == len(args.sources), error_string
 
-    print(args)
+    assert args.count >=0, "The value for --count must be 0 or higher!"
+    assert args.threads >=1, "The value for --threads must be 1 or higher!"
 
+    print(args)
 
     return args
 
@@ -158,7 +165,7 @@ class CreatePoisoner(argparse.Action):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-    
+
     def __call__(self,_,namespace,values: str,option_string: str):
         arg_list = getattr(namespace, self.dest) or []
         match option_string:
@@ -173,9 +180,7 @@ class CreatePoisoner(argparse.Action):
         arg_list.append(poisoner)
         setattr(namespace, self.dest, arg_list)
 
-
 # -----------------------------------------------------------------------------
-
 
 def make_data(args):
     data = {}
@@ -185,12 +190,10 @@ def make_data(args):
     if args.verbose:
         print("Generating random data to POST: ", end="")
         print(data)
-    
+
     return data
 
-
 # -----------------------------------------------------------------------------
-
 
 def wait(args):
     sleep_duration = (
@@ -199,17 +202,40 @@ def wait(args):
 
     if args.verbose:
         print(f"Sleeping for {sleep_duration} seconds...")
-    
+
     sleep(sleep_duration)
+
+# -----------------------------------------------------------------------------
+
+def countdown(count):
+    if count == 0:
+        while True:
+            yield True
+    else:
+        for n in range(count):
+            yield True
+
+def do_request(target, args):
+
+    for run in countdown(args.count):
+        data = make_data(args)
+
+        if args.verbose:
+            print(f"Sending data to {target}...")
+
+        response = requests.post(url=target, data=data)
+
+        if not response.OK and args.verbose:
+            print(f"ERR {response.status_code}: {response.reason}")
+
+        wait(args)
+
 
 # -----------------------------------------------------------------------------
 
 if __name__ == "__main__":
     try:
         args = parse_arguments()
-
-        # multiplies the list of targets for the batch size -> amounts to n = t * b concurrent requests
-        targets = args.target * args.batch_size 
 
         # *** USE TOR ***
         if args.tor_routing:
@@ -233,21 +259,18 @@ if __name__ == "__main__":
         # *** NORMAL REQUESTS ***
         else:
 
-            runs = 0
-            while args.count == 0 or runs < args.count :
-                runs += 1
-                for address in args.target:
-                    data = make_data(args)
-                    
-                    if args.verbose:
-                        print(f"Sending data to {address}...", end="")
-                    
-                    r = requests.post(url=address, data=data)
+            request_threads = []
+            for i in range(args.threads):
+                t = threading.Thread(target=do_request)
+                t.daemon=True
+                request_threads.append(t)
 
-                    if r and args.verbose:
-                            print("OK.")
+            for t in request_threads:
+                t.start()
 
-                    wait(args)
+            for t in request_threads:
+                t.join()
+
 
     except Exception as e:
         print(e)
