@@ -1,7 +1,5 @@
-# import grequests
 import requests
 import threading
-from torpy.http.requests import tor_requests_session
 import random
 import argparse
 from pathlib import Path
@@ -215,21 +213,27 @@ def countdown(count):
         for n in range(count):
             yield True
 
-def do_request(target, args):
+# -----------------------------------------------------------------------------
 
-    for run in countdown(args.count):
+def do_request(url, args):
+
+    for _ in countdown(args.count):
         data = make_data(args)
 
         if args.verbose:
-            print(f"Sending data to {target}...")
+            print(f"Sending data to {url}...")
 
-        response = requests.post(url=target, data=data)
+        response = requests.post(url=url, data=data)
 
-        if not response.OK and args.verbose:
+        if not response.ok and args.verbose:
             print(f"ERR {response.status_code}: {response.reason}")
 
         wait(args)
 
+# -----------------------------------------------------------------------------
+
+def do_tor_request(url, args):
+    pass
 
 # -----------------------------------------------------------------------------
 
@@ -237,31 +241,17 @@ if __name__ == "__main__":
     try:
         args = parse_arguments()
 
-        # *** USE TOR ***
-        if args.tor_routing:
-
-            with tor_requests_session() as s: # returns request.Session() object
-
-                def make_post(address, **kwargs):
-                    if args.verbose:
-                        print(f"Sending data to {address}...")
-                    s.post(data=make_data(args), url=address, **kwargs)
-
-                runs = 0
-                while args.count == 0 or runs < args.count :
-                    runs += 1
-
-                    with ThreadPool(N_THREADS) as pool:
-                        pool.map(make_data, targets)
-
-                    wait(args)
-
-        # *** NORMAL REQUESTS ***
-        else:
+        request_function = do_tor_request if args.tor else do_request
 
             request_threads = []
-            for i in range(args.threads):
-                t = threading.Thread(target=do_request)
+
+        for url in args.url:
+
+            def this_request():
+                return request_function(url, args)
+
+            for _ in range(args.threads):
+                t = threading.Thread(target=this_request)
                 t.daemon=True
                 request_threads.append(t)
 
