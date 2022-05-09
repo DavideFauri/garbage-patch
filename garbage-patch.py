@@ -184,16 +184,18 @@ class CreatePoisoner(argparse.Action):
 
 # -----------------------------------------------------------------------------
 
-def make_data(args):
-    data = {}
-    for (param,source) in zip(args.params, args.sources):
-        data[param] = source.generate()
+def data_generator(args):
 
-    if args.verbose:
-        print("Generating random data to POST: ", end="")
-        print(data)
+    while True:
+        data = {}
+        for (param,source) in zip(args.params, args.sources):
+            data[param] = source.generate()
 
-    return data
+        if args.verbose:
+            print("Generating random data to POST: ", end="")
+            print(data)
+
+        yield data
 
 # -----------------------------------------------------------------------------
 
@@ -219,10 +221,10 @@ def countdown(count):
 
 # -----------------------------------------------------------------------------
 
-def do_request(url, args):
+def do_request(url, data_gen, args):
 
     for _ in countdown(args.count):
-        data = make_data(args)
+        data = next(data_gen)
 
         if args.verbose:
             print(f"Sending data to {url}...")
@@ -267,13 +269,14 @@ if __name__ == "__main__":
         args = parse_arguments()
 
         request_function = do_tor_request if args.tor else do_request
-        
+        data_gen = data_generator(args)
+
         request_threads = []
 
         for url in args.url:
 
             def this_request():
-                return request_function(url, args)
+                return request_function(url, data_gen, args)
 
             for _ in range(args.threads):
                 t = threading.Thread(target=this_request)
