@@ -5,6 +5,7 @@ import argparse
 from pathlib import Path
 from time import sleep
 import genexp
+import useragent
 
 
 ## to test garbage generation:
@@ -191,6 +192,14 @@ def data_generator(args):
 
         yield data
 
+def header_generator(args):
+
+    while True:
+        header = {}
+        header["User-Agent"] = useragent.generate()
+
+        yield header
+
 # -----------------------------------------------------------------------------
 
 def wait(args):
@@ -215,15 +224,16 @@ def countdown(count):
 
 # -----------------------------------------------------------------------------
 
-def do_request(url, data_gen, args):
+def do_request(url, data_gen, header_gen, args):
 
     for _ in countdown(args.count):
         data = next(data_gen)
+        header = next(header_gen)
 
         if args.verbose:
             print(f"Sending data to {url}...")
 
-        response = requests.post(url=url, data=data)
+        response = requests.post(url=url, data=data, headers=header)
 
         if not response.ok and args.verbose:
             print(f"ERR {response.status_code}: {response.reason}")
@@ -238,13 +248,14 @@ if __name__ == "__main__":
 
         request_function = do_request
         data_gen = data_generator(args)
+        header_gen = header_generator(args)
 
         request_threads = []
 
         for url in args.url:
 
             def this_request():
-                return request_function(url, data_gen, args)
+                return request_function(url=url, data_gen=data_gen, header_gen=header_gen, args=args)
 
             for _ in range(args.threads):
                 t = threading.Thread(target=this_request)
